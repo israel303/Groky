@@ -7,6 +7,7 @@ from ebooklib import epub
 from PIL import Image
 import io
 import asyncio
+import fitz  # PyMuPDF for adding image as PDF page
 
 # הגדרת לוגים כי אנחנו אנשים מסודרים 😜
 logging.basicConfig(
@@ -42,25 +43,37 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 # פונקציה לעיבוד PDF
 async def process_pdf(file_path: str, output_path: str) -> bool:
     try:
-        # קריאת ה-PDF
+        logger.info(f"Processing PDF: {file_path}")
+        # המרת התמונה ל-PDF
+        doc = fitz.open()
+        img = fitz.open(THUMBNAIL_PATH)
+        rect = img[0].rect  # גודל התמונה
+        pdf_page = doc.new_page(width=rect.width, height=rect.height)
+        pdf_page.insert_image(rect, filename=THUMBNAIL_PATH)
+        temp_thumb_pdf = "temp_thumb.pdf"
+        doc.save(temp_thumb_pdf)
+        doc.close()
+        img.close()
+
+        # קריאת ה-PDF המקורי
         reader = PdfReader(file_path)
         writer = PdfWriter()
 
-        # העתקת הדפים
+        # הוספת דף ה-thumbnail כדף ראשון
+        thumb_reader = PdfReader(temp_thumb_pdf)
+        writer.add_page(thumb_reader.pages[0])
+
+        # הוספת שאר הדפים מה-PDF המקורי
         for page in reader.pages:
             writer.add_page(page)
 
-        # המרת התמונה לפורמט תקין
-        with Image.open(THUMBNAIL_PATH) as img:
-            img = img.convert('RGB')
-            thumb_io = io.BytesIO()
-            img.save(thumb_io, format='JPEG', quality=85)
-            thumb_data = thumb_io.getvalue()
-
-        # הוספת התמונה כמטא-דאטה (לא תמיד נתמך בכל הקוראים)
-        writer.add_metadata({'/Thumb': f'/{len(thumb_data)} 0 R'})
+        # שמירת ה-PDF החדש
         with open(output_path, 'wb') as f:
             writer.write(f)
+
+        # ניקוי קובץ זמני
+        os.remove(temp_thumb_pdf)
+        logger.info(f"PDF processed successfully: {output_path}")
         return True
     except Exception as e:
         logger.error(f"PDF processing error: {e}")
@@ -69,29 +82,51 @@ async def process_pdf(file_path: str, output_path: str) -> bool:
 # פונקציה לעיבוד EPUB
 async def process_epub(file_path: str, output_path: str) -> bool:
     try:
-        # יצירת ספר EPUB חדש
+        logger.info(f"Processing EPUB: {file_path}")
+        # קריאת ה-EPUB
         book = epub.read_epub(file_path)
 
-        # המרת התמונה לפורמן תקין
+        # המרת התמונה לפורמט תקין
         with Image.open(THUMBNAIL_PATH) as img:
             img = img.convert('RGB')
             thumb_io = io.BytesIO()
             img.save(thumb_io, format='JPEG', quality=85)
             thumb_data = thumb_io.getvalue()
 
-        # הוספת התמונה כ-cover
+        # יצירת פריט תמונה עבור ה-cover
         cover_item = epub.EpubImage()
-        cover_item.id = 'cover-img-item'
+        cover_item.id = 'cover-img'
         cover_item.file_name = 'cover.jpg'
+        cover_item.media_type = 'image/jpeg'
         cover_item.set_content(thumb_data)
         book.add_item(cover_item)
 
-        # עדכון מטא-דאטה להצגת התמונה כ-cover
-        book.add_metadata('DC', 'title', book.get_metadata('DC', 'title')[0] if book.get_metadata('DC', 'title') else 'Book')
-        book.add_metadata(None, 'meta', '', {'name': 'cover', 'content': 'cover-img-item'})
+        # יצירת דף HTML פשוט עבור ה-cover
+        cover_html = epub.EpubHtml(title='Cover', file_name='cover.xhtml', lang='en')
+        cover_html.content = f'''
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Cover</title>
+            </head>
+            <body>
+                <img src="cover.jpg" alt="Cover Image" style="width:100%;height:auto;"/>
+            </body>
+            </html>
+        '''.encode('utf-8')
+        book.add_item(cover_html)
 
-        # שמירת EPUB חדש
+        # עדכון ה-spine והמטא-דאטה
+        book.spine = ['nav', cover_html] + [item for item in book.spine if item not in ['nav']]
+        book.add_metadata('DC', 'title', book.get_metadata('DC', 'title')[0] if book.get_metadata('DC', 'title') else 'Book')
+        book.add_metadata(None, 'meta', '', {'name': 'cover', 'content': 'cover-img'})
+
+        # עדכון ה-TOC
+        book.toc = [epub.Link('cover.xhtml', 'Cover', 'cover')] + book.toc
+
+        # שמירת ה-EPUB החדש
         epub.write_epub(output_path, book)
+        logger.info(f"EPUB processed successfully: {output_path}")
         return True
     except Exception as e:
         logger.error(f"EPUB processing error: {e}")
