@@ -18,6 +18,9 @@ logger = logging.getLogger(__name__)
 # תמונת הthumbnail הקבועה - המלכה שלנו! 👑
 THUMBNAIL_PATH = 'thumbnail.jpg'
 
+# כתובת בסיס ל-Webhook (למשל, כתובת השירות ב-Render)
+BASE_URL = os.getenv('BASE_URL', 'https://groky.onrender.com')
+
 # פונקציית /start - קבלת פנים מלכותית
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
@@ -69,7 +72,7 @@ async def process_epub(file_path: str, output_path: str) -> bool:
         # יצירת ספר EPUB חדש
         book = epub.read_epub(file_path)
 
-        # המרת התמונה לפורמט תקין
+        # המרת התמונה לפורמן תקין
         with Image.open(THUMBNAIL_PATH) as img:
             img = img.convert('RGB')
             thumb_io = io.BytesIO()
@@ -107,7 +110,7 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     try:
         file_obj = await document.get_file()
         input_file = f'temp_{document.file_name}'
-        await file_obj.download_to_file(input_file)
+        await file_obj.download_to_drive(input_file)
 
         # יצירת קובץ פלט זמני
         output_file = f'output_{document.file_name}'
@@ -154,6 +157,12 @@ async def main():
         logger.error("TELEGRAM_TOKEN not set! I can't rule without my scepter! 😤")
         return
 
+    # בניית WEBHOOK_URL מכתובת הבסיס והטוקן
+    webhook_url = f"{BASE_URL}/{token}"
+    if not webhook_url.startswith('https://'):
+        logger.error("BASE_URL must start with https://! I need a secure royal address! 😤")
+        return
+
     # יצירת אפליקציה של הבוט
     application = Application.builder().token(token).build()
 
@@ -165,10 +174,6 @@ async def main():
 
     # הגדרת Webhook
     port = int(os.getenv('PORT', 8443))
-    webhook_url = os.getenv('WEBHOOK_URL')
-    if not webhook_url:
-        logger.error("WEBHOOK_URL not set! I need my royal address! 😤")
-        return
 
     try:
         # אתחול האפליקציה
