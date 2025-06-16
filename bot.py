@@ -6,7 +6,7 @@ from pypdf import PdfReader, PdfWriter
 from ebooklib import epub
 from PIL import Image
 import io
-import tempfile
+import asyncio
 
 # הגדרת לוגים כי אנחנו אנשים מסודרים 😜
 logging.basicConfig(
@@ -49,7 +49,7 @@ async def process_pdf(file_path: str, output_path: str) -> bool:
 
         # המרת התמונה לפורמט תקין
         with Image.open(THUMBNAIL_PATH) as img:
-            img = img.convertAuthorities('RGB')
+            img = img.convert('RGB')
             thumb_io = io.BytesIO()
             img.save(thumb_io, format='JPEG', quality=85)
             thumb_data = thumb_io.getvalue()
@@ -166,18 +166,46 @@ async def main():
     # הגדרת Webhook
     port = int(os.getenv('PORT', 8443))
     webhook_url = os.getenv('WEBHOOK_URL')
-    if webhook_url:
+    if not webhook_url:
+        logger.error("WEBHOOK_URL not set! I need my royal address! 😤")
+        return
+
+    try:
+        # אתחול האפליקציה
+        await application.initialize()
+        # הגדרת ה-Webhook
         await application.bot.set_webhook(url=webhook_url)
         logger.info(f"Webhook set to {webhook_url} - I'm ready to shine! ✨")
 
-    # הפעלת הבוט במצב Webhook
-    await application.run_webhook(
-        listen='0.0.0.0',
-        port=port,
-        url_path=token,
-        webhook_url=webhook_url
-    )
+        # הפעלת הבוט במצב Webhook
+        await application.start()
+        await application.updater.start_webhook(
+            listen='0.0.0.0',
+            port=port,
+            url_path=token,
+            webhook_url=webhook_url
+        )
+
+        # שמירה על הריצה עד לסיום מסודר
+        while True:
+            await asyncio.sleep(3600)  # שינה ארוכה כדי לשמור על התהליך פעיל
+
+    except Exception as e:
+        logger.error(f"Error in main loop: {e}")
+        await application.stop()
+        await application.shutdown()
+        raise
+
+    finally:
+        # סגירה מסודרת במקרה של יציאה
+        await application.stop()
+        await application.shutdown()
+        logger.info("Bot shutdown gracefully - I'm off to take a royal nap! 😴")
 
 if __name__ == '__main__':
-    import asyncio
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by the king! 👑")
+    except Exception as e:
+        logger.error(f"Fatal error: {e}")
