@@ -103,7 +103,7 @@ async def process_epub(file_path: str, output_path: str) -> bool:
 
         # יצירת דף HTML פשוט עבור ה-cover
         cover_html = epub.EpubHtml(title='Cover', file_name='cover.xhtml', lang='en')
-        cover_html.content = f'''
+        cover_html.content = '''
             <!DOCTYPE html>
             <html>
             <head>
@@ -117,8 +117,16 @@ async def process_epub(file_path: str, output_path: str) -> bool:
         book.add_item(cover_html)
 
         # עדכון ה-spine והמטא-דאטה
-        book.spine = ['nav', cover_html] + [item for item in book.spine if item not in ['nav']]
-        book.add_metadata('DC', 'title', book.get_metadata('DC', 'title')[0] if book.get_metadata('DC', 'title') else 'Book')
+        book.spine = ['nav', cover_html] + [item for item in book.spine if item != 'nav']
+        
+        # חילוץ כותרת תקינה ממטא-דאטה
+        title = 'Book'
+        title_metadata = book.get_metadata('DC', 'title')
+        if title_metadata:
+            # חילוץ המחרוזת מהטאפל
+            title = title_metadata[0][0] if isinstance(title_metadata[0], tuple) else title_metadata[0]
+        
+        book.add_metadata('DC', 'title', title)
         book.add_metadata(None, 'meta', '', {'name': 'cover', 'content': 'cover-img'})
 
         # עדכון ה-TOC
