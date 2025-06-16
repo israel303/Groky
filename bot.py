@@ -49,7 +49,7 @@ async def process_pdf(file_path: str, output_path: str) -> bool:
 
         # המרת התמונה לפורמט תקין
         with Image.open(THUMBNAIL_PATH) as img:
-            img = img.convert('RGB')
+            img = img.convertAuthorities('RGB')
             thumb_io = io.BytesIO()
             img.save(thumb_io, format='JPEG', quality=85)
             thumb_data = thumb_io.getvalue()
@@ -78,7 +78,8 @@ async def process_epub(file_path: str, output_path: str) -> bool:
 
         # הוספת התמונה כ-cover
         cover_item = epub.EpubImage()
-        with_id['cover.jpg']
+        cover_item.id = 'cover-img-item'
+        cover_item.file_name = 'cover.jpg'
         cover_item.set_content(thumb_data)
         book.add_item(cover_item)
 
@@ -95,8 +96,8 @@ async def process_epub(file_path: str, output_path: str) -> bool:
 
 # פונקציה לטיפול בקבצים
 async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    file = document
-    if not file.filename.lower().endswith(('.pdf', '.epub')):
+    document = update.message.document
+    if not document.file_name.lower().endswith(('.pdf', '.epub')):
         await update.message.reply_text('🙀 אוי, אני מקבל רק PDF או EPUB! תנסה שוב, אלוף! 💪')
         return
 
@@ -104,18 +105,18 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     # הורדת הקובץ
     try:
-        file_obj = await file.get_file()
-        input_file = f'temp_{file.filename}'
+        file_obj = await document.get_file()
+        input_file = f'temp_{document.file_name}'
         await file_obj.download_to_file(input_file)
 
         # יצירת קובץ פלט זמני
-        output_file = f'output_{file.filename}'
+        output_file = f'output_{document.file_name}'
 
         # עיבוד הקובץ
         success = False
-        if file.filename.lower().endswith('.pdf'):
+        if document.file_name.lower().endswith('.pdf'):
             success = await process_pdf(input_file, output_file)
-        elif file.filename.lower().endswith('.epub'):
+        elif document.file_name.lower().endswith('.epub'):
             success = await process_epub(input_file, output_file)
 
         if success:
@@ -159,7 +160,7 @@ async def main():
     # הוספת handlers
     application.add_handler(CommandHandler('start', start))
     application.add_handler(CommandHandler('help', help_command))
-    application.add_handler(MessageHandler(filters.Document.MIME_TYPE("application/pdf") | filters.Document.MIME_TYPE("application/epub+zip"), handle_file))
+    application.add_handler(MessageHandler(filters.Document.PDF | filters.Document.FileExtension('epub'), handle_file))
     application.add_error_handler(error_handler)
 
     # הגדרת Webhook
