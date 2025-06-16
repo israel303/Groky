@@ -1,6 +1,6 @@
 import logging
 import os
-from telegram import Update
+from telegram import Update, __version__ as TG_VER
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from ebooklib import epub
 from PIL import Image
@@ -19,6 +19,9 @@ THUMBNAIL_PATH = 'thumbnail.jpg'
 
 # כתובת בסיס ל-Webhook (למשל, כתובת השירות ב-Render)
 BASE_URL = os.getenv('BASE_URL', 'https://groky.onrender.com')
+
+# בדיקת גרסת python-telegram-bot
+logger.info(f"Using python-telegram-bot version {TG_VER}")
 
 # פונקציית /start - קבלת פנים מלכותית
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -142,11 +145,13 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 await update.message.reply_text('😿 משהו השתבש בעיבוד ה-EPUB! תקבל את הקובץ המקורי...')
                 output_file = input_file
 
-        # שליחת הקובץ
+        # שליחת הקובץ באמצעות context.bot.send_document
         with open(output_file, 'rb') as f:
-            await update.message.reply_document(
+            await context.bot.send_document(
+                chat_id=update.message.chat_id,
                 document=f,
-                thumb=thumb_io if thumb_io else None,
+                filename=document.file_name,
+                thumbnail=thumb_io if thumb_io else None,
                 caption='🎉 הנה הקובץ עם התמונה המלכותית בטלגרם! 📖'
             )
 
