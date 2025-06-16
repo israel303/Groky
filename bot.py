@@ -2,12 +2,10 @@ import logging
 import os
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from pypdf import PdfReader, PdfWriter
-from ebooklib import epub
 from PIL import Image
 import io
 import asyncio
-import fitz  # PyMuPDF for adding image as PDF page
+import fitz  # PyMuPDF for PDF handling and EPUB conversion
 
 # הגדרת לוגים כי אנחנו אנשים מסודרים 😜
 logging.basicConfig(
@@ -26,7 +24,7 @@ BASE_URL = os.getenv('BASE_URL', 'https://groky.onrender.com')
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         '🎉 שלום, אני בוט הthumbnail המלכותי! 👑\n'
-        'שלח לי קובץ PDF או EPUB, ואני אדביק לו את התמונה הקבועה שלי כמו סטיקר על מחברת! 📖\n'
+        'שלח לי קובץ PDF או EPUB, ואני אדביק לו תמונה מגניבה שתיראה בטלגרם! 📖\n'
         'רוצה עזרה? תזרוק /help ותראה כמה אני חכם! 😎'
     )
 
@@ -35,109 +33,41 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.message.reply_text(
         '😅 תקוע? הנה המדריך המהיר שלי:\n'
         '1. שלח לי קובץ PDF או EPUB.\n'
-        '2. אני אוסיף לו את הthumbnail הקבוע שלי (בלי דרמות!).\n'
-        '3. תקבל את הקובץ בחזרה, יפה ומסודר! 📚\n'
+        '2. אני אוסיף לו תמונת thumbnail שתיראה בטלגרם (בלי דרמות!).\n'
+        '3. תקבל את הקובץ בחזרה, מוכן להרשים! 📚\n'
         'שאלות? תשלח הודעה, ואני אעשה פוזה של חכם! 🤓'
     )
 
-# פונקציה לעיבוד PDF
-async def process_pdf(file_path: str, output_path: str) -> bool:
+# פונקציה להכנת thumbnail עבור טלגרם
+async def prepare_thumbnail() -> io.BytesIO:
     try:
-        logger.info(f"Processing PDF: {file_path}")
-        # המרת התמונה ל-PDF
-        doc = fitz.open()
-        img = fitz.open(THUMBNAIL_PATH)
-        rect = img[0].rect  # גודל התמונה
-        pdf_page = doc.new_page(width=rect.width, height=rect.height)
-        pdf_page.insert_image(rect, filename=THUMBNAIL_PATH)
-        temp_thumb_pdf = "temp_thumb.pdf"
-        doc.save(temp_thumb_pdf)
-        doc.close()
-        img.close()
-
-        # קריאת ה-PDF המקורי
-        reader = PdfReader(file_path)
-        writer = PdfWriter()
-
-        # הוספת דף ה-thumbnail כדף ראשון
-        thumb_reader = PdfReader(temp_thumb_pdf)
-        writer.add_page(thumb_reader.pages[0])
-
-        # הוספת שאר הדפים מה-PDF המקורי
-        for page in reader.pages:
-            writer.add_page(page)
-
-        # שמירת ה-PDF החדש
-        with open(output_path, 'wb') as f:
-            writer.write(f)
-
-        # ניקוי קובץ זמני
-        os.remove(temp_thumb_pdf)
-        logger.info(f"PDF processed successfully: {output_path}")
-        return True
-    except Exception as e:
-        logger.error(f"PDF processing error: {e}")
-        return False
-
-# פונקציה לעיבוד EPUB
-async def process_epub(file_path: str, output_path: str) -> bool:
-    try:
-        logger.info(f"Processing EPUB: {file_path}")
-        # קריאת ה-EPUB
-        book = epub.read_epub(file_path)
-
-        # המרת התמונה לפורמט תקין
         with Image.open(THUMBNAIL_PATH) as img:
             img = img.convert('RGB')
             thumb_io = io.BytesIO()
             img.save(thumb_io, format='JPEG', quality=85)
-            thumb_data = thumb_io.getvalue()
+            thumb_io.seek(0)
+            return thumb_io
+    except Exception as e:
+        logger.error(f"Thumbnail preparation error: {e}")
+        return None
 
-        # יצירת פריט תמונה עבור ה-cover
-        cover_item = epub.EpubImage()
-        cover_item.id = 'cover-img'
-        cover_item.file_name = 'cover.jpg'
-        cover_item.media_type = 'image/jpeg'
-        cover_item.set_content(thumb_data)
-        book.add_item(cover_item)
-
-        # יצירת דף HTML פשוט עבור ה-cover
-        cover_html = epub.EpubHtml(title='Cover', file_name='cover.xhtml', lang='en')
-        cover_html.content = '''
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>Cover</title>
-            </head>
-            <body>
-                <img src="cover.jpg" alt="Cover Image" style="width:100%;height:auto;"/>
-            </body>
-            </html>
-        '''.encode('utf-8')
-        book.add_item(cover_html)
-
-        # עדכון ה-spine והמטא-דאטה
-        book.spine = ['nav', cover_html] + [item for item in book.spine if item != 'nav']
-        
-        # חילוץ כותרת תקינה ממטא-דאטה
-        title = 'Book'
-        title_metadata = book.get_metadata('DC', 'title')
-        if title_metadata:
-            # חילוץ המחרוזת מהטאפל
-            title = title_metadata[0][0] if isinstance(title_metadata[0], tuple) else title_metadata[0]
-        
-        book.add_metadata('DC', 'title', title)
-        book.add_metadata(None, 'meta', '', {'name': 'cover', 'content': 'cover-img'})
-
-        # עדכון ה-TOC
-        book.toc = [epub.Link('cover.xhtml', 'Cover', 'cover')] + book.toc
-
-        # שמירת ה-EPUB החדש
-        epub.write_epub(output_path, book)
-        logger.info(f"EPUB processed successfully: {output_path}")
+# פונקציה להמרת EPUB ל-PDF פשוט
+async def convert_epub_to_pdf(epub_path: str, output_pdf_path: str) -> bool:
+    try:
+        logger.info(f"Converting EPUB to PDF: {epub_path}")
+        doc = fitz.open()
+        # הוספת דף עם התמונה כתוכן זמני (כי EPUB לא תומך ב-thumbnails)
+        img = fitz.open(THUMBNAIL_PATH)
+        rect = img[0].rect
+        pdf_page = doc.new_page(width=rect.width, height=rect.height)
+        pdf_page.insert_image(rect, filename=THUMBNAIL_PATH)
+        doc.save(output_pdf_path)
+        doc.close()
+        img.close()
+        logger.info(f"EPUB converted to PDF: {output_pdf_path}")
         return True
     except Exception as e:
-        logger.error(f"EPUB processing error: {e}")
+        logger.error(f"EPUB to PDF conversion error: {e}")
         return False
 
 # פונקציה לטיפול בקבצים
@@ -147,34 +77,41 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text('🙀 אוי, אני מקבל רק PDF או EPUB! תנסה שוב, אלוף! 💪')
         return
 
-    await update.message.reply_text('📥 קיבלתי את הקובץ! תן לי רגע לעטוף אותו בתמונה המלכותית... 🎨')
+    await update.message.reply_text('📥 קיבלתי את הקובץ! תן לי רגע לעטוף אותו בתמונה המלכותית לטלגרם... 🎨')
 
-    # הורדת הקובץ
     try:
+        # הכנת thumbnail עבור טלגרם
+        thumb_io = await prepare_thumbnail()
+        if not thumb_io:
+            await update.message.reply_text('😿 אוי, התמונה המלכותית שלי התבלבלה! תנסה שוב? 🙏')
+            return
+
+        # הורדת הקובץ
         file_obj = await document.get_file()
         input_file = f'temp_{document.file_name}'
         await file_obj.download_to_drive(input_file)
 
-        # יצירת קובץ פלט זמני
-        output_file = f'output_{document.file_name}'
-
-        # עיבוד הקובץ
-        success = False
-        if document.file_name.lower().endswith('.pdf'):
-            success = await process_pdf(input_file, output_file)
-        elif document.file_name.lower().endswith('.epub'):
-            success = await process_epub(input_file, output_file)
-
-        if success:
-            # שליחת הקובץ המעודכן
-            with open(output_file, 'rb') as f:
-                await update.message.reply_document(document=f, caption='🎉 הנה הקובץ עם הthumbnail החדש! 📖')
-        else:
-            await update.message.reply_text('😿 משהו השתבש! הקובץ לא עובד או שהתמונה שלי קנאית מדי... תנסה שוב? 🙏')
+        # טיפול בקובץ
+        output_file = input_file  # ברירת מחדל: שולחים את הקובץ המקורי
+        if document.file_name.lower().endswith('.epub'):
+            # המרת EPUB ל-PDF
+            output_file = f'output_{document.file_name.replace(".epub", ".pdf")}'
+            success = await convert_epub_to_pdf(input_file, output_file)
+            if not success:
+                await update.message.reply_text('😿 משהו השתבש בהמרת ה-EPUB! תנסה שוב? 🙏')
+                os.remove(input_file)
+                return
+        # שליחת הקובץ עם thumbnail
+        with open(output_file, 'rb') as f:
+            await update.message.reply_document(
+                document=f,
+                thumb=thumb_io,
+                caption='🎉 הנה הקובץ עם התמונה המלכותית בטלגרם! 📖'
+            )
 
         # ניקוי קבצים זמניים
         os.remove(input_file)
-        if os.path.exists(output_file):
+        if output_file != input_file and os.path.exists(output_file):
             os.remove(output_file)
 
     except Exception as e:
