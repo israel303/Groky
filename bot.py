@@ -113,6 +113,9 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         else:  # EPUB
             base, ext = os.path.splitext(document.file_name)
             output_file = f'{base}_OldTown{ext}'
+            thumb_io = await prepare_thumbnail()
+            if not thumb_io:
+                await update.message.reply_text('⚠️ התמונה לא נטענה – אעבד את הקובץ בלי עטיפה.')
             success = await process_epub(input_file, output_file)
             if not success:
                 await update.message.reply_text('⚠️ קרתה תקלה בעיבוד ה־EPUB – אחזור לקובץ המקורי.')
